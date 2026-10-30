@@ -1,37 +1,59 @@
-# vivecut
+# vivecut 🎬🎥
 
-An AI director for multi-camera live-show footage. Give it a Nikon/camcorder master recording
-plus however many phone and action-cam clips your friends shot, and it builds a unified
-real-world timeline, analyzes performer movement and shot quality on every camera, and renders
-a full multicam edit -- deciding shot-by-shot which camera is actually the most interesting one
-to be on, instead of a human scrubbing through five angles of a two-hour show by hand.
+Automatically direct a multicam edit of your live show, instead of scrubbing through five angles
+of a two-hour concert by hand.
 
-Built as a [Claude Code](https://claude.com/claude-code) skill. Drop this folder into
-`.claude/skills/` (or your own skills directory) and point Claude at your raw footage.
+You've got a camcorder running the whole set, plus a few phones and action cams scattered around
+pointed at the stage. Nobody's clocks agree, nobody's framing is consistent, and nobody filmed
+the whole show on one camera. 🎸 `vivecut` takes that whole pile of footage and builds a single
+continuous multicam edit: it figures out where every clip really falls on a shared timeline, then
+decides shot-by-shot which camera is actually the most interesting one to be on right now — who's
+moving, who's in frame, who's about to do something — and cuts to it. On the beat, not on a
+stopwatch. 🥁
 
-## What it does
+This is an agentic skill. `SKILL.md` holds the agent's instructions, written for an AI agent to
+read and drive the scripts in `scripts/`. 🤖 You bring the raw footage and tell the agent roughly
+who shot what, and it figures out the sync, the scoring, and the editing.
 
-1. **Builds a unified timeline.** Every camera's clips get matched to real-world UTC time via
-   audio cross-correlation (GCC-PHAT) against the master recording, not by trusting each
-   camera's own clock -- phone clocks and GoPro clocks drift, lie, or reset.
-2. **Scores every camera, every moment.** Pose/movement activity, audio energy, shot quality
-   (zoom/glow detection, blackout detection), with a few real-editing heuristics baked in:
-   don't flicker between cameras too fast, give every camera at least one look per song, and
-   anticipate a camera that's *about* to get interesting a few seconds before it peaks.
-3. **Cuts on the beat.** Shot length is tempo-aware (via `librosa` beat tracking on the song's
-   own audio), not a fixed clock -- fast songs get faster cuts, slow songs hold longer.
-4. **Renders the full show.** 4K canvas, per-source treatments (landscape scale-to-fill,
-   portrait blur-fill for phones, centered blur-fill for action cams), GPU-accelerated where it's
-   been verified pixel-identical to the CPU path, with a full provenance JSON sidecar explaining
-   *why* the director picked each cut.
+## Why this is hard 🧩
 
-See `SKILL.md` for the full pipeline (one script per stage), the hard-won lessons from building
-this against real footage (clock drift, aliased audio correlation, frame-rounding drift, GPU
-pixel-discrepancy dead ends), and the actual scoring math.
+Every camera's clock is wrong in a different way. Phone clocks drift and reset, action-cam clocks
+run fast or slow by minutes over a long show, and nobody hits record at the same instant anyway.
+None of that can be trusted — the only honest signal for "when did this clip really happen" is
+the audio itself, cross-correlated against the one camera that ran continuously for the whole
+show.
+
+Knowing *when* a clip happened isn't the same as knowing whether it's worth showing. A camera
+can be rock-steady and perfectly in frame while nobody's doing anything, and a phone footage
+clip can be a shaky mess exactly when the moment is great. A good director score has to weigh
+movement, energy, and shot quality together, resist flickering between cameras every two
+seconds, and still give every camera at least one look rather than just parking on whichever
+scores highest in a vacuum. Read `SKILL.md` for the full reasoning, the bugs that got found
+fixing this on real footage (clock drift, audio aliasing onto a repeated chorus, frame-rounding
+drift accumulating over a whole song), and why each design choice exists.
+
+## Requirements ⚙️
+
+`ffmpeg`/`ffprobe` on PATH, an NVIDIA GPU (every encode goes through NVENC, no CPU fallback), and
+Python 3 with `numpy`, `librosa`, and `opencv-python`. Pose/movement extraction uses a YOLO
+pose model (`ultralytics`).
+
+## Quick start 🚀
+
+See `SKILL.md` for the full walkthrough and what each flag means. Short version, from your show's
+working folder:
+
+```powershell
+py scripts\build_masters.py --out Masters --song-windows windows.csv --labeled nikon=<dir> --labeled gopro1=<dir>
+py scripts\build_timeline.py --out timeline.json --masters-manifest Masters\manifest.json --song-windows windows.csv
+py scripts\extract_people.py Masters Masters-Activity
+py scripts\build_highlights_edl.py
+py scripts\render_song.py 01
+```
 
 ## Status
 
 Built and proven end-to-end on a real 22-song, 5-camera show. The per-show director/render
 scripts (`build_highlights_edl.py`, `render_song.py`) still hardcode some show-specific
-assumptions (a fixed show-root path via `VIVECUT_SHOW_ROOT`, a 4-role band/camera layout) --
+assumptions (a fixed show-root path via `VIVECUT_SHOW_ROOT`, a 4-role band/camera layout) —
 treat them as a working reference implementation to adapt, not a drop-in CLI tool yet.
